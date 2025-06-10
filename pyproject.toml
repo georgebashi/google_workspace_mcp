@@ -45,6 +45,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+py_modules = ["main"]
+
 [project.scripts]
 google-workspace-mcp = "main:main"
 
