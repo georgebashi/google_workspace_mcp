@@ -45,8 +45,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-[project.scripts]
-google-workspace-mcp = ".:main"
+[project.run]
+run = "main.py"
 
 [tool.setuptools]
 packages = ["auth", "gcalendar", "core", "gdocs", "gdrive", "gmail", "gchat", "gsheets"]
