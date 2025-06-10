@@ -46,7 +46,7 @@ classifiers = [
 ]
 
 [project.scripts]
-google-workspace-mcp = "main:main"
+google-workspace-mcp = ".:main"
 
 [tool.setuptools]
 packages = ["auth", "gcalendar", "core", "gdocs", "gdrive", "gmail", "gchat", "gsheets"]
