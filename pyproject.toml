@@ -49,5 +49,5 @@ classifiers = [
 google-workspace-mcp = "main:main"
 
 [tool.setuptools]
-packages = ["auth", "gcalendar", "core", "gdocs", "gdrive", "gmail", "gchat", "gsheets"]
+packages = ["auth", "gcalendar", "core", "gdocs", "gdrive", "gmail", "gchat", "gsheets", "gforms"]
 py-modules = ["main"]
