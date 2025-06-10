@@ -50,4 +50,4 @@ google-workspace-mcp = "main:main"
 
 [tool.setuptools]
 packages = ["auth", "gcalendar", "core", "gdocs", "gdrive", "gmail", "gchat", "gsheets"]
-py_modules = ["main"]
+py-modules = ["main"]
