@@ -414,6 +414,20 @@ async def _google_api_executor(server: FastMCP):
 
 # Custom FastMCP that adds secure middleware stack for OAuth 2.1
 class SecureFastMCP(FastMCP):
+    def tool(self, name_or_fn=None, **kwargs):
+        """Register a tool with no output schema unless one is passed.
+
+        FastMCP gives every ``-> str`` tool the output schema
+        ``{"result": string}`` and then sends each result twice: as text and
+        as ``structuredContent: {"result": text}``. Clients that hand the
+        structured copy to the model, such as Claude desktop, pass it every
+        result JSON-escaped inside that wrapper, which costs tokens on every
+        call. With no schema only the text is sent. A tool that returns a
+        dict still sends it as structured content.
+        """
+        kwargs.setdefault("output_schema", None)
+        return super().tool(name_or_fn, **kwargs)
+
     def http_app(self, **kwargs) -> "Starlette":
         """Override to add secure middleware stack for OAuth 2.1."""
         # Bound memory retained by abandoned stateful sessions. Resolve an omitted
