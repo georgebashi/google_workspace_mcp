@@ -527,8 +527,7 @@ async def get_drive_file_download_url(
     Returns:
         str: File metadata with either a local file path or download URL. In
         stateless mode the same text comes back as a ToolResult that also
-        embeds the file; the annotation stays str so the advertised output
-        schema is unchanged.
+        embeds the file.
     """
     logger.info(
         f"[get_drive_file_download_url] Invoked. File ID: '{file_id}', Export format: {export_format}"

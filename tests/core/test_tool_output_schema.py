@@ -1,29 +1,22 @@
 """Text results reach the client as plain text, not as a JSON-escaped copy."""
 
-import importlib
-
 import pytest
 from fastmcp import Client
 from mcp.types import TextContent
 
 from core.server import SecureFastMCP, server
-
-TOOL_MODULES = [
-    "gmail.gmail_tools",
-    "gdrive.drive_tools",
-    "gcalendar.calendar_tools",
-    "gdocs.docs_tools",
-    "gsheets.sheets_tools",
-    "gchat.chat_tools",
-    "gforms.forms_tools",
-    "gslides.slides_tools",
-    "gtasks.tasks_tools",
-    "gcontacts.contacts_tools",
-    "gsearch.search_tools",
-    "gappsscript.apps_script_tools",
-]
-for module in TOOL_MODULES:
-    importlib.import_module(module)
+import gappsscript.apps_script_tools  # noqa: F401
+import gcalendar.calendar_tools  # noqa: F401
+import gchat.chat_tools  # noqa: F401
+import gcontacts.contacts_tools  # noqa: F401
+import gdocs.docs_tools  # noqa: F401
+import gdrive.drive_tools  # noqa: F401
+import gforms.forms_tools  # noqa: F401
+import gmail.gmail_tools  # noqa: F401
+import gsearch.search_tools  # noqa: F401
+import gsheets.sheets_tools  # noqa: F401
+import gslides.slides_tools  # noqa: F401
+import gtasks.tasks_tools  # noqa: F401
 
 
 def probe_server() -> SecureFastMCP:
