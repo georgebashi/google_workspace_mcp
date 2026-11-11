@@ -47,7 +47,7 @@ more than it saves.
 
 | Tool | Rung | Returns |
 | --- | --- | --- |
-| `get_presentation` | deck | Slide IDs, titles, element counts, notes state |
+| `get_presentation` | deck | Slide IDs, titles, element counts, notes state, layouts |
 | `get_page` | page content | Every element with ID, all text, cells, notes, image URLs |
 | `get_page_markup` | element/page IR | Editable projection, whole page or scoped to elements; `raw` for the `Page` resource |
 | `edit_page` | write | Applies edited markup back, to one or more pages |
@@ -55,12 +55,19 @@ more than it saves.
 | `batch_update_presentation` | write | Escape hatch: raw requests behind a required revision guard |
 | `render_page_to_image` | visual | Rendered page as image content |
 | `create_presentation` | structure | New deck |
-| `add_slide`, `duplicate_slide`, `delete_slide`, `move_slide` | structure | Deck-level slide operations |
+| `add_slide` | structure | New slide from a layout, placeholders optionally filled, in one write |
+| `duplicate_slide`, `delete_slide`, `move_slide` | structure | Deck-level slide operations |
+| `find_in_presentation` | search | Follow-up, not v1. Slide and element IDs with snippets for a literal match |
 
 Replaced and removed by this design: `get_page` (old text/detail renderer),
 `get_page_thumbnail`, and the `include_geometry` / `include_styles` / `raw`
-flag set on `get_page`. `batch_update_presentation` is kept as the escape hatch,
-with its revision guard made mandatory.
+flag set on `get_page` and `get_presentation`. `batch_update_presentation` is
+kept as the escape hatch, with its revision guard made mandatory.
+
+Removing `include_styles` drops deck-wide style proofing on purpose (see
+*Decisions*, 5). `include_geometry`'s other job, finding a deck's margins
+before adding elements, is covered by `get_page_markup`, whose boxes are in
+points.
 
 The write path, `get_page_markup`'s output and `replace_text` are specified in
 `docs/slides-edit-workflow.md`, which supersedes the corresponding sections
@@ -159,13 +166,20 @@ URL: https://docs.google.com/presentation/d/1xYz_MobileCheckoutQ4Readout/edit
 Slides: 4   Page size: 9144000 x 5143500 EMU   Revision: abc123
 
 1. g1a2b3c4d5_0_0  Mobile Checkout Refresh
-   2 shapes  notes: 142 chars
+   layout p2  2 shapes  notes: 142 chars
 2. g1a2b3c4d5_1_0  Checkout conversion is up 12% QoQ
-   1 shape  notes: -
+   layout p3  1 shape  notes: -
 3. g1a2b3c4d5_2_0  (no title)
-   1 table (3x3)  notes: -
+   layout p11  1 table (3x3)  notes: -
 4. g1a2b3c4d5_3_0  (no title)
-   1 chart, 1 image  notes: -
+   layout p11  1 chart, 1 image  notes: -
+
+Layouts:
+  p2   Title slide      CENTERED_TITLE, SUBTITLE   slide 1
+  p3   Title and body   TITLE, BODY                slide 2
+  p4   Section header   TITLE, BODY                -
+  p5   Two columns      TITLE, BODY:1, BODY:2      -
+  p11  Blank            -                          slides 3-4
 ```
 
 Titles come from the title placeholder when the slide has one, otherwise from the
@@ -174,6 +188,66 @@ through this MCP are bare text boxes with no placeholder.
 
 The revision ID is included so a later `edit_page` can be guarded without a
 second read.
+
+**Layouts.** Each slide line names its layout, and a `Layouts` section lists
+every layout once: ID, `layoutProperties.displayName`, the placeholder types it
+provides, and the slides that use it. This is what `add_slide` needs, because a
+slide's placeholders can only come from its layout, and an opaque ID such as
+`p3` does not say which layout is "Title and body".
+
+- Placeholder types are listed in the layout's z-order. When a type appears more
+  than once, each carries its `placeholder.index` (`BODY:1`, `BODY:2`), which is
+  the key `add_slide` uses.
+- With one master, the master is not mentioned. With several, layouts are
+  grouped under a `Master <id>  <displayName>` heading, because a new slide can
+  only use a layout of the master current at its position (see `add_slide`).
+- Layout and master content is not shown. `get_page_markup` accepts a layout
+  ID for that.
+- Corporate templates can carry 20 to 40 layouts. The cost of the section is
+  part of the projection measurement. If it is too large, the fallback is
+  unused layouts by ID and name only, without placeholder types.
+
+## `add_slide`
+
+New slide from a layout, with its placeholders optionally filled, in one
+write.
+
+**Input**
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `presentation_id` | string | yes | |
+| `layout_id` | string | no | A layout ID from `get_presentation`. Default: the layout of the slide it follows, the commonest choice ("another one like this"). |
+| `after` | string | no | Page ID to insert after, or `"start"`. Default: the end. A page ID, not an index, because indices shift as slides are added. |
+| `text` | object | no | Placeholder key to text body, e.g. `{"TITLE": "Q4 plan", "BODY": ["One", "Two"]}`. Keys are the layout's placeholder types, with `:index` when a type repeats. A text body is the same shape as in `get_page_markup`. |
+
+**Behaviour**
+
+- Compiles to one `createSlide` with `slideLayoutReference.layoutId` and
+  `placeholderIdMappings` giving every placeholder a server-generated ID, then
+  `insertText` for each `text` entry against those IDs, in the same batch and
+  behind the revision guard. One call, one atomic write.
+- The API resolves a layout against the master current at the insertion point:
+  the master of the preceding slide, the first slide's master when inserting at
+  the start, or the first master when the deck is empty. A layout from another
+  master is a 400 at write time, so it is refused before writing, with the
+  layouts the current master does have.
+- A `text` key the layout does not provide is refused, listing the layout's
+  placeholder keys. New text follows carry rule 5 of
+  `docs/slides-edit-workflow.md`: it takes placeholder and theme defaults.
+- `predefinedLayout` is not accepted. The API does not guarantee that a
+  predefined layout exists in a given master, and the deck's own layouts are
+  already listed.
+
+**Output body**
+
+The receipt, followed by the new slide's `get_page_markup` projection, so a
+further `edit_page` needs no read:
+
+```
+added slide g1a2b3c4d5_4_0 at position 3 (after g1a2b3c4d5_1_0)  layout p3 Title and body
+revision AKXw... -> AKXx...
+```
 
 ## `get_page_markup`
 
@@ -364,6 +438,34 @@ attachment instead of the model tokenising 130k characters of base64 as text.
 Measured cost of the image itself, per slide: ~425-480 tokens at 800px,
 ~1,445-1,920 at 1600px, ~2,125-3,000 at 2000px.
 
+## `find_in_presentation`
+
+Follow-up after v1, not part of it. Deck-wide literal search, so that "which
+slide mentions pricing" does not cost a read of every slide.
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `presentation_id` | string | yes | |
+| `query` | string | yes | Literal text |
+| `match_case` | boolean | no | Default false |
+| `include_notes` | boolean | no | Default true |
+
+The Slides API has no search, and Drive full-text search finds files, not
+slides. The server fetches the whole deck in one `presentations.get` and
+matches server side, so the agent pays only for the hits:
+
+```
+3 matches for "pricing" on 2 slides
+slide 2  g1a2b3c4d5_1_0  shape g1a2b3c4d5_1_2 (BODY)  "...the new pricing page converts..."
+slide 5  g1a2b3c4d5_4_0  table g1a2b3c4d5_4_1 [2,1]  "Pricing"
+slide 5  notes g1a2b3c4d5_4_notes_shape  "...ask about pricing before..."
+```
+
+Element IDs feed straight into `get_page_markup` `targets`, skipping
+`get_page`. Matching is the same code `replace_text` uses to report where its
+matches are, so with the same `match_case` the two tools always agree on what
+matches. Hits are capped (50), with a count of the rest.
+
 ## Round trips
 
 > **Superseded** by *The loop* in `docs/slides-edit-workflow.md`; `edit_page`
@@ -397,27 +499,39 @@ edit_page(presentation_id, page_id, markup=<the body above>)
 - An SVG renderer. Google's own renderer is the ground truth for what a slide
   looks like; a second renderer that disagrees with it would be worse than none.
 
-## Open questions
+## Decisions
 
-1. ~~Does the `notesPage` embedded in a real `pages.get` response carry
-   `pageElements`?~~ **Settled.** Across 16 live `pages.get` responses, every
+Formerly open questions, all settled.
+
+1. **Notes come with the page fetch.** Across 16 live `pages.get` responses, every
    embedded `notesPage` carried `objectId`, `pageType`, `pageProperties`,
    `notesProperties` and `pageElements` (2 elements each), with the speaker
    notes shape present in all 16. Notes therefore ride along in the same fetch,
    and `notesProperties.speakerNotesObjectId` is the writable target. Rendering
    a notes page also succeeds, so `render_page_to_image` needs no special case.
-2. Should `get_presentation` cover layouts and masters, or slides only? Current
-   answer: slides only, but expose layout and master IDs per slide, since they
-   are what an agent needs to pick a template or explain an inherited style.
-3. Is a flagless `get_page` acceptable? Current answer: yes, provided
-   element-scoped `get_page_markup` carries the ancestor context needed to
-   interpret a nested element.
-
-New questions raised in review:
-
-4. Should deck-wide content search exist? A title-only deck digest means
-   searching for content costs one read per slide. A search tool returning slide
-   and element IDs with snippets would remove that.
-5. Compact style and geometry proofing was a real capability of the old surface
-   (`include_geometry` / `include_styles`). Is it worth a separate tool, given
-   that the alternative is a full `get_page_markup` per slide?
+2. **`get_presentation` lists layouts, not their content.** Slide IDs alone
+   were the earlier answer, but `add_slide` must pick a layout, placeholders
+   come only from a layout, and a layout ID does not say what the layout is.
+   Rejected: a separate `list_layouts` tool (a schema in every session and an
+   extra call before each `add_slide`) and full layout and master content
+   (expensive, and layout editing is a non-goal). See *Layouts* under
+   `get_presentation`.
+3. **`get_page` stays flagless.** The condition was that element-scoped
+   `get_page_markup` carries the context to interpret a nested element. It
+   does: a target inside a group comes back with absolute geometry and its
+   group ID. Rejected: `targets` on `get_page`, which would duplicate
+   `get_page_markup`'s scoping and break the guarantee that a digest shows
+   everything on the page.
+4. **Deck-wide search is a separate tool, `find_in_presentation`, after v1.**
+   Rejected: a `query` parameter on `get_presentation` (a dial on a flagless
+   read, and a filtered deck view is hard to describe), and `replace_text` with
+   a `dry_run` as search (agents doing read-only tasks would not look under
+   "replace").
+5. **No proofing tool in v1.** Geometry for placing new elements is covered by
+   `get_page_markup`. Deck-wide style proofing, which `include_styles` gave,
+   is dropped on purpose: use `get_page_markup` per slide for exact values, or
+   `render_page_to_image` (about 450 tokens a slide at 800 px), which also
+   shows inherited styling. The PR description says so, since existing callers
+   lose it. Revisit a dedicated tool (distinct font, size and colour
+   combinations with counts and locations, plus off-margin boxes) once the
+   projection's per-slide cost is measured.
