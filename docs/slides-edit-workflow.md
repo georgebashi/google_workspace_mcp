@@ -1,7 +1,7 @@
 # Slides Edit Workflow (Design)
 
-Status: draft, not implemented. Supersedes the `get_page_markup` and `edit_page`
-sections of `docs/slides-tool-surface.md`.
+Status: draft, not implemented. Supersedes the `get_presentation:markup` and
+`manage_presentation:edit` sections of `docs/slides-tool-surface.md`.
 
 ## The loop
 
@@ -12,12 +12,12 @@ edit:
 
 | Step | Tool | Cost |
 | --- | --- | --- |
-| 0. Plain text swap? Stop here | `replace_text` | one call, no read |
-| 1. Find the content | `get_page` | cheap digest, whole slide |
-| 2. Fetch what will be edited | `get_page_markup` | one element, or one page |
+| 0. Plain text swap? Stop here | `manage_presentation:replace_text` | one call, no read |
+| 1. Find the content | `get_presentation:page` | cheap digest, whole slide |
+| 2. Fetch what will be edited | `get_presentation:markup` | one element, or one page |
 | 3. Edit the JSON in context | — | no tool call |
-| 4. Apply | `edit_page` | one call, one atomic write |
-| 5. Look at the result | `get_page` or `render_page_to_image` | optional |
+| 4. Apply | `manage_presentation:edit` | one call, one atomic write |
+| 5. Look at the result | `get_presentation:page` or `render_page_to_image` | optional |
 
 Step 4 returns a receipt that says what changed, whether a read-back matched, and
 the version tokens needed to edit the same elements again. So step 5 is a choice
@@ -25,7 +25,7 @@ rather than a requirement, and a second edit needs no second read.
 
 ## Walkthrough
 
-**Step 1.** `get_page(presentation_id, page_id)`:
+**Step 1.** `get_presentation(action="page", presentation_id, page_id)`:
 
 ```
 page g1a2b3c4d5_1_0  SLIDE  2 elements  revision AKXv...
@@ -37,7 +37,7 @@ page g1a2b3c4d5_1_0  SLIDE  2 elements  revision AKXv...
   - Mobile web trails at 12.4%
 ```
 
-**Step 2.** `get_page_markup(presentation_id, page_id, targets=["g1a2b3c4d5_1_1"])`:
+**Step 2.** `get_presentation(action="markup", presentation_id, page_id, targets=["g1a2b3c4d5_1_1"])`:
 
 ```json
 {
@@ -77,7 +77,7 @@ The second run is a bare string, so it keeps the style the text already had. The
 agent never copies a style object it did not mean to change, never sees or
 computes a text index, and never emits a request.
 
-**Step 4.** `edit_page(presentation_id, pages=[<the edited body>])`:
+**Step 4.** `manage_presentation(action="edit", presentation_id, pages=[<the edited body>])`:
 
 ```
 applied  revision AKXv... -> AKXw...  4 requests  verified
@@ -335,7 +335,7 @@ survive a restart, are not shared between replicas, and do not fit
 hex digits of a SHA-256 over its canonical projection (below). The page is its
 own snapshot:
 
-1. `edit_page` fetches the page fresh.
+1. `manage_presentation:edit` fetches the page fresh.
 2. For each element in the payload, it projects the current element and
    compares its `v` with the payload's.
 3. **Match:** the current element is what the agent read, so the payload is
@@ -373,7 +373,7 @@ and absent only for view-only access: across 90 decks it was present on all 45
 the caller could edit and on all 37 it could only comment on, and absent on all
 8 it could only view. So:
 
-- No revision on a fresh read means the caller is view-only. `edit_page` fails
+- No revision on a fresh read means the caller is view-only. `manage_presentation:edit` fails
   before compiling: "you have view-only access to this presentation". There is
   no unguarded write path.
 - A revision does not mean the caller can edit. A commenter's write fails with
@@ -388,14 +388,14 @@ The `batchUpdate` response carries the new revision in
 `writeControl.requiredRevisionId`, so the receipt reports it without another
 read.
 
-## What `edit_page` does
+## What `manage_presentation:edit` does
 
 **Input**
 
 | Name | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `presentation_id` | string | yes | |
-| `pages` | object[] | yes | One or more edited `get_page_markup` bodies, each with `page_id`. Elements may be a subset of what was fetched. Optional `delete` per page. |
+| `pages` | object[] | yes | One or more edited `get_presentation:markup` bodies, each with `page_id`. Elements may be a subset of what was fetched. Optional `delete` per page. |
 | `dry_run` | boolean | no | Validate and compile, return the receipt with the planned requests, write nothing. |
 
 Several pages go into one batch: one atomic write, one revision bump. Changing a
@@ -633,7 +633,7 @@ than NONE are not supported").
 - `v` is computed over displayed values, so freezing a shape the agent holds does
   not change its `v` unless the agent's edit does. Edits chained on the agent's
   own copy keep working.
-- `replace_text` cannot freeze first: `replaceAllText` has no per-shape order,
+- `manage_presentation:replace_text` cannot freeze first: `replaceAllText` has no per-shape order,
   and it freezes every shape it touches. The bake still applies, and the result
   is the same: replaced text keeps its displayed size. The receipt lists the
   shapes that stopped auto-fitting.
@@ -712,7 +712,7 @@ Resolves the "map or refuse, never ignore" decision for v1.
 Every v2 row is reachable today through the escape hatch, and the refusal says so
 by naming the request.
 
-## `get_page_markup`
+## `get_presentation:markup`
 
 **Input**
 
@@ -726,9 +726,9 @@ by naming the request.
 A target inside a group returns that element with absolute geometry and its
 `group` ID. A target that is a group returns its descendants.
 
-## `replace_text`
+## `manage_presentation:replace_text`
 
-Deck-wide find and replace, the cheapest edit there is and the first tool the
+Deck-wide find and replace, the cheapest edit there is and the first action the
 descriptions point to for "change X to Y".
 
 | Name | Type | Required | Notes |
@@ -760,22 +760,24 @@ note  2 of the shapes had autofit on; it is now off, text fixed at its displayed
 
 `batch_update_presentation(presentation_id, requests, required_revision_id)`
 takes raw Google requests behind a mandatory revision guard and does not
-guarantee formatting preservation. The revision comes from `get_page`,
-`get_presentation`, or any receipt, and `get_page_markup(raw=true)` provides the
+guarantee formatting preservation. The revision comes from `get_presentation:page`,
+`get_presentation:deck`, or any receipt, and `get_presentation:markup(raw=true)` provides the
 resource to write against. It exists so that a refusal is never a dead end.
 
 ## Tool descriptions
 
 Only the first line of a description reliably reaches the model
-(`google_workspace_mcp-rv6`), so each first line has to carry the routing:
+(`google_workspace_mcp-rv6`). With actions, that line has to name them in the
+order to use them, so the routing survives consolidation:
 
 | Tool | First line |
 | --- | --- |
-| `replace_text` | Replace text everywhere in a deck, or on chosen slides, keeping formatting. Use this first for any plain text change. |
-| `get_page` | Read one slide's content: every element ID and all text. Start here. |
-| `get_page_markup` | Fetch editable JSON for one slide or chosen elements, to change and pass to edit_page. |
-| `edit_page` | Apply edited get_page_markup JSON to one or more slides. Only what differs is written; formatting is kept. |
+| `get_presentation` | Read a deck: action "deck" lists slides and layouts, "page" gives one slide's element IDs and all text (start here), "markup" gives editable JSON for manage_presentation "edit". |
+| `manage_presentation` | Change a deck: action "replace_text" first for any plain text change, "edit" applies changed get_presentation "markup" JSON keeping formatting, plus "add_slide", "duplicate_slide", "delete_slide", "move_slide". |
 | `batch_update_presentation` | Last resort: raw Slides API requests behind a revision guard. Does not preserve formatting. |
+
+The per-action detail follows in the docstring's `action` entry, one line per
+action naming the parameters it uses, as in `manage_calendar`.
 
 ## Where agents go wrong, and what catches it
 
@@ -796,7 +798,7 @@ Only the first line of a description reliably reaches the model
 | Edits or moves an autofit box | Freeze at displayed size: nothing visibly changes; `autofit` visible before, `dry_run` says it will freeze, receipt notes overflow risk |
 | Adds a field the tool cannot write | Refused by the strict schema, naming the escape-hatch request |
 | Retries after a timeout | Same payload is safe: `already applied` |
-| Uses edit_page for a word swap across slides | Descriptions route to `replace_text` first |
+| Uses manage_presentation:edit for a word swap across slides | Descriptions route to `manage_presentation:replace_text` first |
 
 ## Cost
 
@@ -818,7 +820,7 @@ needs only its text.
 
 The projection's size has not been measured yet. The ticket requires measuring
 it on the same 24-slide fixture used for the earlier numbers, for a whole page
-and for one element, against `get_page(raw=True)`.
+and for one element, against today's `get_page(raw=True)`.
 
 ## Verified API behaviour
 
@@ -843,7 +845,7 @@ is folded into the section named.
 | Inherited shrink | Slide shape reports its displayed `fontScale`; baked like local shrink | *Autofit* |
 | `revisionId` presence | Present for edit and comment access, absent for view only | *Concurrency* |
 | Revision scope | Same on every page; stale guard is a 400 with a fixed message; reads do not change it | *Concurrency* |
-| `replaceAllText` and notes | Unfiltered: reaches notes. Slide filter: skips notes. Notes page ID: accepted | *`replace_text`* |
+| `replaceAllText` and notes | Unfiltered: reaches notes. Slide filter: skips notes. Notes page ID: accepted | *`manage_presentation:replace_text`* |
 | `deleteObject` in groups | Group delete removes descendants; a group left with one child dissolves and promotes it in place | *Element identity* |
 | Object ID length | Under 5 characters is a 400 | *Element identity* |
 

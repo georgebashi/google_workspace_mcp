@@ -35,45 +35,90 @@ more than it saves.
    The read body is the Slides API `Page` resource; the write body is the same
    resource, edited. Google's documentation is the specification, so the surface
    does not drift as the API grows.
-2. **Progressive disclosure across tools, not flags.** Three rungs of detail,
-   each a separate tool whose name says which rung it is. A tool's name and first
-   description line are the entire steering surface an agent sees, so the ladder
-   has to be legible from a tool listing.
+2. **Few tools, progressive disclosure through actions.** One read tool and one
+   write tool, each taking an `action`, following the repository's
+   `get_<resource>` / `manage_<resource>` convention (`get_script_project`,
+   `manage_calendar`, `manage_event`, `manage_contact`). The read actions are
+   three rungs of detail, `deck`, `page` and `markup`. A tool's name and first
+   description line are the entire steering surface an agent sees, so the first
+   line names the actions in the order to use them, and the ladder is legible
+   from a tool listing.
 3. **Scope is inferred from the payload.** An edit touches exactly the elements
    present in the submitted markup. An agent that fetched one element can edit
    that element without ever holding the rest of the page.
 
 ## Tool surface
 
-| Tool | Rung | Returns |
-| --- | --- | --- |
-| `get_presentation` | deck | Slide IDs, titles, element counts, notes state, layouts |
-| `get_page` | page content | Every element with ID, all text, cells, notes, image URLs |
-| `get_page_markup` | element/page IR | Editable projection, whole page or scoped to elements; `raw` for the `Page` resource |
-| `edit_page` | write | Applies edited markup back, to one or more pages |
-| `replace_text` | write | Deck-wide find and replace |
-| `batch_update_presentation` | write | Escape hatch: raw requests behind a required revision guard |
-| `render_page_to_image` | visual | Rendered page as image content |
-| `create_presentation` | structure | New deck |
-| `add_slide` | structure | New slide from a layout, placeholders optionally filled, in one write |
-| `duplicate_slide`, `delete_slide`, `move_slide` | structure | Deck-level slide operations |
-| `find_in_presentation` | search | Follow-up, not v1. Slide and element IDs with snippets for a literal match |
+Five Slides tools, down from today's `get_presentation` and `get_page` with
+their flags, plus a tool for each new operation. In this document
+`get_presentation:page` is short for `get_presentation(action="page", ...)`.
 
-Replaced and removed by this design: `get_page` (old text/detail renderer),
-`get_page_thumbnail`, and the `include_geometry` / `include_styles` / `raw`
-flag set on `get_page` and `get_presentation`. `batch_update_presentation` is
-kept as the escape hatch, with its revision guard made mandatory.
+| Tool | Action | Rung | Returns |
+| --- | --- | --- | --- |
+| `create_presentation` | — | structure | New deck. Unchanged, like `create_doc`, `create_spreadsheet` and `create_form` |
+| `get_presentation` | `deck` | deck | Slide IDs, titles, element counts, notes state, layouts |
+| | `page` | page content | Every element with ID, all text, cells, notes, image URLs |
+| | `markup` | element/page IR | Editable projection, whole page or scoped to elements; `raw` for the `Page` resource |
+| | `find` | search | Follow-up, not v1. Slide and element IDs with snippets for a literal match |
+| `manage_presentation` | `edit` | write | Applies edited markup back, to one or more pages |
+| | `replace_text` | write | Deck-wide find and replace |
+| | `add_slide` | structure | New slide from a layout, placeholders optionally filled, in one write |
+| | `duplicate_slide`, `delete_slide`, `move_slide` | structure | Deck-level slide operations |
+| `render_page_to_image` | — | visual | Rendered page as image content. Unchanged |
+| `batch_update_presentation` | — | write | Escape hatch: raw requests behind a required revision guard |
+
+Outside the consolidation, and unchanged:
+
+- `render_page_to_image` stays its own tool. It returns image content where
+  every other read returns text, and it already exists in this form.
+- `batch_update_presentation` stays its own tool, as `batch_update_doc` and
+  `batch_update_form` do for their services. Its name says "raw requests", which
+  is the point of an escape hatch.
+- `list_presentation_comments` and `manage_presentation_comment` are the shared
+  comment tools every editor service has.
+
+**Conventions**, copied from `manage_calendar` and `get_script_project`:
+
+- `action: str`, required, normalised with `action.lower().strip()`. An
+  unknown action raises `UserInputError` naming the valid ones.
+- One flat list of optional parameters. Each parameter's description says
+  which actions use it ("Required for `markup`", "Used by `add_slide`"), and
+  the handler raises `UserInputError` when a required one is missing. No
+  per-action schema unions.
+- The docstring's `action` entry lists each action with one line saying what
+  it does and which parameters it uses, as `manage_calendar` does.
+- Each action dispatches to a private `_<action>_impl` helper.
+- `get_presentation` is `readOnlyHint=True`, `idempotentHint=True`,
+  `is_read_only=True` in `handle_http_errors`, and requires `slides_read`.
+  `manage_presentation` is `destructiveHint=True` and requires `slides`. The
+  split is by scope, so `--read-only` mode keeps `get_presentation` and
+  `render_page_to_image` and drops the rest without special handling.
+- `core/tool_tiers.yaml`: `create_presentation`, `get_presentation` and
+  `manage_presentation` in `core`; `render_page_to_image` and
+  `batch_update_presentation` in `extended`; the comment tools in `complete`,
+  as now.
+- The same change updates the README's tool count,
+  `skills/managing-google-workspace/SKILL.md` and
+  `skills/managing-google-workspace/references/slides.md`, as the
+  `manage_calendar` consolidation did.
+
+Replaced and removed by this design: `get_page` and its `include_geometry` /
+`include_styles` / `raw` flags, and the same flags on `get_presentation`, which
+keeps its name but now takes a required `action`. `batch_update_presentation`
+keeps its name, with its revision guard made mandatory. All of these are
+breaking changes for existing callers, as the `manage_calendar` consolidation
+was.
 
 Removing `include_styles` drops deck-wide style proofing on purpose (see
 *Decisions*, 5). `include_geometry`'s other job, finding a deck's margins
-before adding elements, is covered by `get_page_markup`, whose boxes are in
+before adding elements, is covered by `get_presentation:markup`, whose boxes are in
 points.
 
-The write path, `get_page_markup`'s output and `replace_text` are specified in
+The write path, `get_presentation:markup`'s output and `manage_presentation:replace_text` are specified in
 `docs/slides-edit-workflow.md`, which supersedes the corresponding sections
 below.
 
-## `get_page`
+## `get_presentation:page`
 
 Content digest. Lossless on content, lossy on presentation: every element
 appears with its ID, all text appears in full, and no geometry, font, colour or
@@ -86,7 +131,7 @@ z-order detail appears at all. This is the default read.
 | `presentation_id` | string | yes | |
 | `page_id` | string | yes | The page's `objectId` |
 
-No other parameters. The tool deliberately has no dial.
+No other parameters. The action deliberately has no dial.
 
 **Output body**
 
@@ -141,13 +186,13 @@ Rules:
   see it, so "no more IDs" is not misread as "nothing else is visible".
 
 **Invariant.** Parity is defined over the elements the slide owns: the set of
-`objectId`s in the digest equals the set in `get_page_markup` for the same page
+`objectId`s in the digest equals the set in `get_presentation:markup` for the same page
 at the same revision, with notes-page elements accounted for separately because
 they live under `slideProperties.notesPage` rather than `pageElements`. This is
 the property that makes the digest trustworthy as a "you have seen everything"
 signal, and it is the regression test for the original bug.
 
-## `get_presentation`
+## `get_presentation:deck`
 
 Deck digest. No slide content beyond the title.
 
@@ -186,28 +231,28 @@ Titles come from the title placeholder when the slide has one, otherwise from th
 first text-bearing element in z-order. The fallback matters because decks built
 through this MCP are bare text boxes with no placeholder.
 
-The revision ID is included so a later `edit_page` can be guarded without a
+The revision ID is included so a later `manage_presentation:edit` can be guarded without a
 second read.
 
 **Layouts.** Each slide line names its layout, and a `Layouts` section lists
 every layout once: ID, `layoutProperties.displayName`, the placeholder types it
-provides, and the slides that use it. This is what `add_slide` needs, because a
+provides, and the slides that use it. This is what `manage_presentation:add_slide` needs, because a
 slide's placeholders can only come from its layout, and an opaque ID such as
 `p3` does not say which layout is "Title and body".
 
 - Placeholder types are listed in the layout's z-order. When a type appears more
   than once, each carries its `placeholder.index` (`BODY:1`, `BODY:2`), which is
-  the key `add_slide` uses.
+  the key `manage_presentation:add_slide` uses.
 - With one master, the master is not mentioned. With several, layouts are
   grouped under a `Master <id>  <displayName>` heading, because a new slide can
-  only use a layout of the master current at its position (see `add_slide`).
-- Layout and master content is not shown. `get_page_markup` accepts a layout
+  only use a layout of the master current at its position (see `manage_presentation:add_slide`).
+- Layout and master content is not shown. `get_presentation:markup` accepts a layout
   ID for that.
 - Corporate templates can carry 20 to 40 layouts. The cost of the section is
   part of the projection measurement. If it is too large, the fallback is
   unused layouts by ID and name only, without placeholder types.
 
-## `add_slide`
+## `manage_presentation:add_slide`
 
 New slide from a layout, with its placeholders optionally filled, in one
 write.
@@ -217,9 +262,9 @@ write.
 | Name | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `presentation_id` | string | yes | |
-| `layout_id` | string | no | A layout ID from `get_presentation`. Default: the layout of the slide it follows, the commonest choice ("another one like this"). |
+| `layout_id` | string | no | A layout ID from `get_presentation:deck`. Default: the layout of the slide it follows, the commonest choice ("another one like this"). |
 | `after` | string | no | Page ID to insert after, or `"start"`. Default: the end. A page ID, not an index, because indices shift as slides are added. |
-| `text` | object | no | Placeholder key to text body, e.g. `{"TITLE": "Q4 plan", "BODY": ["One", "Two"]}`. Keys are the layout's placeholder types, with `:index` when a type repeats. A text body is the same shape as in `get_page_markup`. |
+| `text` | object | no | Placeholder key to text body, e.g. `{"TITLE": "Q4 plan", "BODY": ["One", "Two"]}`. Keys are the layout's placeholder types, with `:index` when a type repeats. A text body is the same shape as in `get_presentation:markup`. |
 
 **Behaviour**
 
@@ -241,17 +286,17 @@ write.
 
 **Output body**
 
-The receipt, followed by the new slide's `get_page_markup` projection, so a
-further `edit_page` needs no read:
+The receipt, followed by the new slide's `get_presentation:markup` projection, so a
+further `manage_presentation:edit` needs no read:
 
 ```
 added slide g1a2b3c4d5_4_0 at position 3 (after g1a2b3c4d5_1_0)  layout p3 Title and body
 revision AKXw... -> AKXx...
 ```
 
-## `get_page_markup`
+## `get_presentation:markup`
 
-> **Superseded.** `get_page_markup` returns an index-free projection by
+> **Superseded.** `get_presentation:markup` returns an index-free projection by
 > default, with the `Page` resource below only under `raw=true`, and the scope
 > parameter is `targets`. See `docs/slides-edit-workflow.md`. This section
 > still describes the `raw` output.
@@ -288,13 +333,13 @@ The `Page` resource, for editing.
 `page` is the API resource unmodified, except that `pageElements` is pruned to
 the requested scope. `pageSize` is included because element `transform` and
 `size` are raw EMU against it, and without it those numbers cannot be
-interpreted. `revisionId` is included so `edit_page` can be guarded.
+interpreted. `revisionId` is included so `manage_presentation:edit` can be guarded.
 
 When `element_object_ids` is given, the response carries the requested elements
 and their descendants only. Everything else on the page is absent, so an agent
 can retrieve and rewrite a single text box without ever holding the page.
 
-## `edit_page`
+## `manage_presentation:edit`
 
 > **Superseded.** The write path is redesigned in
 > `docs/slides-edit-workflow.md`, which replaces the markup-in/resource-out
@@ -312,7 +357,7 @@ Applies edited markup.
 | --- | --- | --- | --- |
 | `presentation_id` | string | yes | |
 | `page_id` | string | yes | |
-| `markup` | object | yes | A body of the shape `get_page_markup` returns |
+| `markup` | object | yes | A body of the shape `get_presentation:markup` returns |
 | `delete_object_ids` | string[] | no | Elements to delete, validated against the page |
 | `dry_run` | boolean | no | Return the requests that would be applied, without applying |
 
@@ -334,7 +379,7 @@ containing group to be the unit of scope, and report the deletion cascade in
 `dry_run`.
 
 Notes sit outside `pageElements`, under `slideProperties.notesPage`. They are an
-explicitly allowed nested scope: always reported by `get_page_markup`, written
+explicitly allowed nested scope: always reported by `get_presentation:markup`, written
 by replacing the text of the BODY shape named by
 `notesProperties.speakerNotesObjectId`, never by `createShape` — and the shape ID
 can change after it is created implicitly, so it must be re-read rather than
@@ -438,7 +483,7 @@ attachment instead of the model tokenising 130k characters of base64 as text.
 Measured cost of the image itself, per slide: ~425-480 tokens at 800px,
 ~1,445-1,920 at 1600px, ~2,125-3,000 at 2000px.
 
-## `find_in_presentation`
+## `get_presentation:find`
 
 Follow-up after v1, not part of it. Deck-wide literal search, so that "which
 slide mentions pricing" does not cost a read of every slide.
@@ -461,31 +506,31 @@ slide 5  g1a2b3c4d5_4_0  table g1a2b3c4d5_4_1 [2,1]  "Pricing"
 slide 5  notes g1a2b3c4d5_4_notes_shape  "...ask about pricing before..."
 ```
 
-Element IDs feed straight into `get_page_markup` `targets`, skipping
-`get_page`. Matching is the same code `replace_text` uses to report where its
+Element IDs feed straight into `get_presentation:markup` `targets`, skipping
+`get_presentation:page`. Matching is the same code `manage_presentation:replace_text` uses to report where its
 matches are, so with the same `match_case` the two tools always agree on what
 matches. Hits are capped (50), with a count of the rest.
 
 ## Round trips
 
-> **Superseded** by *The loop* in `docs/slides-edit-workflow.md`; `edit_page`
+> **Superseded** by *The loop* in `docs/slides-edit-workflow.md`; `manage_presentation:edit`
 > now takes `pages=[...]` and there is no separate `dry_run` pass in the loop.
 
 **One element, without holding the page.** The common case for a formatting fix.
 
 ```
-get_page_markup(presentation_id, page_id, element_object_ids=["shape_3"])
+get_presentation(action="markup", presentation_id, page_id, element_object_ids=["shape_3"])
 edit that element's JSON
-edit_page(presentation_id, page_id, markup=<the body above>)
+manage_presentation(action="edit", presentation_id, page_id, markup=<the body above>)
 ```
 
 **Whole slide.** Same calls, no `element_object_ids`.
 
 ```
-get_page_markup(presentation_id, page_id)
+get_presentation(action="markup", presentation_id, page_id)
 edit the page JSON
-edit_page(presentation_id, page_id, markup=<the body above>, dry_run=True)
-edit_page(presentation_id, page_id, markup=<the body above>)
+manage_presentation(action="edit", presentation_id, page_id, markup=<the body above>, dry_run=True)
+manage_presentation(action="edit", presentation_id, page_id, markup=<the body above>)
 ```
 
 ## Non-goals
@@ -494,7 +539,7 @@ edit_page(presentation_id, page_id, markup=<the body above>)
   exports presentations as PPTX/ODP/PDF/plain text only, and the Slides API has
   no markdown handling), and markdown cannot express geometry, theme or
   placeholder inheritance. The Page resource is the representation instead.
-- Layout and master editing. `get_page_markup` accepts any page ID, so layouts
+- Layout and master editing. `get_presentation:markup` accepts any page ID, so layouts
   are readable, but editing them is out of scope.
 - An SVG renderer. Google's own renderer is the ground truth for what a slide
   looks like; a second renderer that disagrees with it would be worse than none.
@@ -509,29 +554,43 @@ Formerly open questions, all settled.
    notes shape present in all 16. Notes therefore ride along in the same fetch,
    and `notesProperties.speakerNotesObjectId` is the writable target. Rendering
    a notes page also succeeds, so `render_page_to_image` needs no special case.
-2. **`get_presentation` lists layouts, not their content.** Slide IDs alone
-   were the earlier answer, but `add_slide` must pick a layout, placeholders
+2. **`get_presentation:deck` lists layouts, not their content.** Slide IDs alone
+   were the earlier answer, but `manage_presentation:add_slide` must pick a layout, placeholders
    come only from a layout, and a layout ID does not say what the layout is.
-   Rejected: a separate `list_layouts` tool (a schema in every session and an
-   extra call before each `add_slide`) and full layout and master content
+   Rejected: a separate `layouts` action (an extra call before each
+   `manage_presentation:add_slide`) and full layout and master content
    (expensive, and layout editing is a non-goal). See *Layouts* under
-   `get_presentation`.
-3. **`get_page` stays flagless.** The condition was that element-scoped
-   `get_page_markup` carries the context to interpret a nested element. It
+   `get_presentation:deck`.
+3. **`get_presentation:page` stays flagless.** The condition was that element-scoped
+   `get_presentation:markup` carries the context to interpret a nested element. It
    does: a target inside a group comes back with absolute geometry and its
-   group ID. Rejected: `targets` on `get_page`, which would duplicate
-   `get_page_markup`'s scoping and break the guarantee that a digest shows
+   group ID. Rejected: `targets` on `get_presentation:page`, which would duplicate
+   `get_presentation:markup`'s scoping and break the guarantee that a digest shows
    everything on the page.
-4. **Deck-wide search is a separate tool, `find_in_presentation`, after v1.**
-   Rejected: a `query` parameter on `get_presentation` (a dial on a flagless
-   read, and a filtered deck view is hard to describe), and `replace_text` with
+4. **Deck-wide search is a `find` action on `get_presentation`, after v1.**
+   Rejected: a `query` parameter on `get_presentation:deck` (a dial on a flagless
+   read, and a filtered deck view is hard to describe), and `manage_presentation:replace_text` with
    a `dry_run` as search (agents doing read-only tasks would not look under
    "replace").
 5. **No proofing tool in v1.** Geometry for placing new elements is covered by
-   `get_page_markup`. Deck-wide style proofing, which `include_styles` gave,
-   is dropped on purpose: use `get_page_markup` per slide for exact values, or
+   `get_presentation:markup`. Deck-wide style proofing, which `include_styles` gave,
+   is dropped on purpose: use `get_presentation:markup` per slide for exact values, or
    `render_page_to_image` (about 450 tokens a slide at 800 px), which also
    shows inherited styling. The PR description says so, since existing callers
    lose it. Revisit a dedicated tool (distinct font, size and colour
    combinations with counts and locations, plus off-margin boxes) once the
    projection's per-slide cost is measured.
+6. **Two consolidated tools, following the repository's convention.** The
+   earlier surface had a tool per rung and per write (`get_page`,
+   `get_page_markup`, `edit_page`, `replace_text`, `add_slide`, ...). They
+   become actions on `get_presentation` and `manage_presentation`, matching
+   `get_script_project` and `manage_calendar`, which the maintainer folded
+   together the same way. Fewer tool schemas sit in every session's context, and
+   splitting read from write by scope keeps `--read-only` mode and the
+   read-only annotation exact. `render_page_to_image` and
+   `batch_update_presentation` stay separate (see *Tool surface*). Rejected: a
+   per-action schema union, which states each action's required parameters in
+   the schema but which the repository does not use and some clients handle
+   badly. The cost: routing moves from tool names into each tool's first
+   description line, and `core/tool_tiers.yaml` can no longer put the rungs in
+   different tiers.
