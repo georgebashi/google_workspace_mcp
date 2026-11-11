@@ -50,7 +50,6 @@ page g1a2b3c4d5_1_0  SLIDE  2 elements  revision AKXv...
     {
       "id": "g1a2b3c4d5_1_1",
       "v": "7f3a9c01",
-      "shape": "TEXT_BOX",
       "placeholder": "TITLE",
       "box": {"x": 54, "y": 32, "w": 612, "h": 79},
       "text": [
@@ -168,7 +167,11 @@ paragraphs. The shapes are chosen so that the common case is a bare string:
   can be restyled but not removed or edited, because no request creates one.
 - **Paragraph props** are `align`, `space_above`, `space_below`,
   `line_spacing`, `indent_start`, `indent_first_line`, `indent_end`,
-  `direction` and `bullet`. Read emits only the ones set locally.
+  `direction` and `bullet`. Read emits only the ones set locally. A shape with
+  no placeholder reports resolved props on every paragraph; verified live, the
+  editor's defaults there are `align` `START` in a `TEXT_BOX` and `CENTER` in
+  other shapes, and `line_spacing` 100, so those values are omitted and absent
+  means that default (2.6% of tokens).
 - `\n` inside run text is refused: "split it into two paragraphs, or use
   `\u000b` for a line break inside the paragraph". Tabs are literal.
 - The body always has at least one paragraph; `[]` means `[""]`. The terminal
@@ -219,6 +222,9 @@ Editing a `styles` entry restyles every run in the payload that references it.
 `underline`, `strike`, `small_caps`, `baseline` (`SUPERSCRIPT` / `SUBSCRIPT`),
 `font`, `weight` (only when not 400), `size` (pt), `color`, `bg`, `link`.
 
+- `weight` 700 is omitted on a bold run: the API reports it alongside `bold`,
+  which already says it (0.7%).
+
 - Colours are `"#RRGGBB"`, a theme colour name (`"ACCENT1"`), or
   `"transparent"`. RGB is compared in hex, so the API's float channels
   round-trip without spurious writes; a changed colour is written as `k/255`.
@@ -226,6 +232,9 @@ Editing a `styles` entry restyles every run in the payload that references it.
   (`"NEXT_SLIDE"`, `"PREVIOUS_SLIDE"`, `"FIRST_SLIDE"`, `"LAST_SLIDE"`). Links
   are in the projection because an agent splitting or merging runs would
   otherwise drop or extend them without seeing it.
+- Setting a link applies underline and the `HYPERLINK` colour (verified live),
+  so a linked run omits `underline: true` and `color: "HYPERLINK"` on read, and
+  the write gets them back from the API (0.4%).
 
 ### Bullets
 
@@ -242,6 +251,10 @@ be read and the writes that can be made exactly:
   `"lists": {"L1": {"glyphs": {"0": "1.", "1": "a."}}}`, read only, built from
   the glyphs rendered on its paragraphs, so the agent can see what the list looks
   like.
+- **Shorthand.** When every bulleted paragraph in an element belongs to one
+  list, which is nearly always, the bullet is just its level: `"bullet": 1`.
+  On write, an integer means a level in the element's only list; a second list
+  needs the full form (1.5%).
 - Bulleted paragraphs report an `indentStart` the bullet itself put there (36 pt
   per level). The projection omits `indent_start` and `indent_first_line` on a
   bulleted paragraph when they equal what its level implies, so a bullet's
@@ -306,9 +319,11 @@ be read and the writes that can be made exactly:
   edit rather than trusting a cached one, and never emits a zero-length
   `deleteText`, so writing notes on a slide that has none is not an API error.
 - `alt` is `{"title", "description"}`, emitted only when non-empty.
-- `fill` (`"#RRGGBB"`, a theme colour, or `"none"`), `outline`
-  (`{"color", "weight", "dash"}` or `"none"`), `content_align` and `link` on a
+- `fill` (`"#RRGGBB"`, a theme colour, `{"color", "alpha"}` when translucent,
+  or `"none"`), `outline` (`{"color", "alpha", "weight", "dash"}` or `"none"`), `content_align` and `link` on a
   shape are emitted only when set locally; absent means inherited.
+- A solid fill with alpha 0 draws nothing and reads as `"none"`.
+  HTML-imported decks set one on every text box.
 - A shape with no placeholder has nothing to inherit from, and the API reports
   its resolved `content_align`, fill and outline. Verified live, a new shape
   from the editor or the API gets `content_align` `TOP` for a `TEXT_BOX` and
@@ -317,7 +332,8 @@ be read and the writes that can be made exactly:
   that default. (Measured: 2.0% and 1.7% of tokens.) `"none"` stays on other
   shape types, which get a theme fill and outline.
 - A shape's `kind` is omitted: its `shape` type says it is a shape. Every other
-  element names its `kind`.
+  element names its `kind`. A shape with no `shape` is a `TEXT_BOX`, the
+  commonest type, on read and on create (2.1%).
 - An image carries `src`, its `sourceUrl`. Changing it emits `replaceImage`
   with `CENTER_INSIDE`, or with `CENTER_CROP` when the payload sets
   `"fit": "crop"`.
@@ -471,7 +487,7 @@ refuses anything not listed here, naming the field.
 
 | Kind | Required | Optional (default) | Refused |
 | --- | --- | --- | --- |
-| `shape` | `shape` (an API shape type, e.g. `TEXT_BOX`, `RECTANGLE`), `box` | `text` (empty), `fill`, `outline`, `content_align`, `link`, `alt` (all inherited from the theme) | `placeholder` (placeholders come only from a layout), `autofit` (read only) |
+| `shape` | `box` | `shape` (an API shape type, default `TEXT_BOX`), `text` (empty), `fill`, `outline`, `content_align`, `link`, `alt` (all inherited from the theme) | `placeholder` (placeholders come only from a layout), `autofit` (read only) |
 | `table` | `box` (`x`, `y` only), `rows` | `col_widths`, `row_heights` (API defaults), `alt` | `span` (merges are refused in v1), `w`, `h` (derived) |
 | `image` | `src` (a public `http(s)` URL the API fetches once), `box` | `fit` (`"inside"`), `alt` | data URIs, Drive file IDs |
 | `line` | `box`, where `x`, `y` is the start, `w`, `h` the extent, and `flip` the direction | `category` (`STRAIGHT`, `BENT` or `CURVED`; default `STRAIGHT`) | `rot`, connections to other elements (v2) |

@@ -95,10 +95,8 @@ def test_bullets_and_glyphs():
         )
     )
     el = out["elements"][0]
-    assert el["text"] == [
-        {"text": "One", "bullet": {"list": "L1", "level": 0}},
-        {"text": "Two", "bullet": {"list": "L1", "level": 1}},
-    ]
+    # One list in the element: the bullet is just its level.
+    assert el["text"] == [{"text": "One", "bullet": 0}, {"text": "Two", "bullet": 1}]
     assert el["lists"] == {"L1": {"glyphs": {"0": "●", "1": "○"}}}
 
 
@@ -184,7 +182,8 @@ def test_editor_defaults_are_omitted():
     el = project_page(shape_page([para(), run("x\n")], shapeProperties=defaults))[
         "elements"
     ][0]
-    assert "kind" not in el and el["shape"] == "TEXT_BOX"
+    # No kind and no shape: a text box.
+    assert "kind" not in el and "shape" not in el
     assert not {"content_align", "fill", "outline"} & set(el)
 
     page = shape_page(
@@ -200,3 +199,62 @@ def test_editor_defaults_are_omitted():
 def test_box_is_whole_points():
     m = (1.0, 0.0, 0.0, 1.0, 10.4 * EMU, 20.6 * EMU)
     assert project_box(m, size(100.3, 40)) == {"x": 10, "y": 21, "w": 100, "h": 40}
+
+
+def test_two_lists_keep_list_names():
+    out = project_page(
+        shape_page(
+            [
+                para(listId="a", nestingLevel=0),
+                run("One\n"),
+                para(listId="b", nestingLevel=0),
+                run("Two\n"),
+            ]
+        )
+    )
+    assert [p["bullet"] for p in out["elements"][0]["text"]] == [
+        {"list": "L1", "level": 0},
+        {"list": "L2", "level": 0},
+    ]
+
+
+def test_implied_styles_and_paragraph_defaults_are_omitted():
+    link = {"url": "https://example.com"}
+    hyper = {"opaqueColor": {"themeColor": "HYPERLINK"}}
+    elements = [
+        {"paragraphMarker": {"style": {"alignment": "START", "lineSpacing": 100}}},
+        run(
+            "Bold", bold=True, weightedFontFamily={"fontFamily": "Arial", "weight": 700}
+        ),
+        run(" link\n", link=link, underline=True, foregroundColor=hyper),
+        {"paragraphMarker": {"style": {"alignment": "CENTER", "lineSpacing": 115}}},
+        run("Centred\n"),
+    ]
+    out = project_page(shape_page(elements))
+    assert out["styles"] == {
+        "s1": {"bold": True, "font": "Arial"},
+        "s2": {"link": "https://example.com"},
+    }
+    assert out["elements"][0]["text"] == [
+        {"runs": [{"text": "Bold", "s": "s1"}, {"text": " link", "s": "s2"}]},
+        {"text": "Centred", "align": "CENTER", "line_spacing": 115},
+    ]
+
+
+def test_transparent_fill_reads_as_none():
+    clear = {
+        "shapeBackgroundFill": {"solidFill": {"alpha": 0, "color": {"rgbColor": {}}}}
+    }
+    el = project_page(shape_page([para(), run("x\n")], shapeProperties=clear))[
+        "elements"
+    ][0]
+    assert "fill" not in el  # "none" on a text box is its default
+    half = {
+        "shapeBackgroundFill": {
+            "solidFill": {"alpha": 0.5, "color": {"rgbColor": {"red": 1}}}
+        }
+    }
+    el = project_page(shape_page([para(), run("x\n")], shapeProperties=half))[
+        "elements"
+    ][0]
+    assert el["fill"] == {"color": "#ff0000", "alpha": 0.5}

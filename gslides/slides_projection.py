@@ -175,7 +175,8 @@ def project_text_style(style: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     if font:
         out["font"] = font
     weight = weighted.get("weight")
-    if weight and weight != 400:
+    # The API reports weight 700 alongside bold; bold already says it.
+    if weight and weight != 400 and not (out.get("bold") and weight == 700):
         out["weight"] = weight
     size = _dim_pt(s.get("fontSize"))
     if size is not None:
@@ -191,6 +192,12 @@ def project_text_style(style: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     link = _link(s.get("link"))
     if link:
         out["link"] = link
+        # Setting a link applies underline and the HYPERLINK colour (verified
+        # live), so on a linked run they are implied.
+        if out.get("underline"):
+            out.pop("underline")
+        if out.get("color") == "HYPERLINK":
+            out.pop("color")
     return out
 
 
@@ -237,7 +244,11 @@ _PARA_FIELDS = (
 )
 
 
-def _paragraph_props(style: Dict[str, Any], level: Optional[int]) -> Dict[str, Any]:
+def _paragraph_props(
+    style: Dict[str, Any],
+    level: Optional[int],
+    defaults: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     props: Dict[str, Any] = {}
     for api, name in _PARA_FIELDS:
         if api not in style:
@@ -250,6 +261,8 @@ def _paragraph_props(style: Dict[str, Any], level: Optional[int]) -> Dict[str, A
         elif api == "lineSpacing":
             value = _pt(value)
         elif api == "direction" and value == "LEFT_TO_RIGHT":
+            continue
+        if defaults and defaults.get(name) == value:
             continue
         props[name] = value
     if level is not None:
@@ -267,8 +280,13 @@ def project_text(
     lists: ListTable,
     glyphs: Optional[Dict[str, Dict[str, str]]] = None,
     scale: float = 1.0,
+    para_defaults: Optional[Dict[str, Any]] = None,
 ) -> List[Any]:
-    """A text body as a list of paragraphs, terminal newline implicit."""
+    """A text body as a list of paragraphs, terminal newline implicit.
+
+    ``para_defaults`` are paragraph props the API reports on every paragraph of
+    a shape with no placeholder, which are omitted when they match.
+    """
     elements = (text or {}).get("textElements", [])
     paragraphs: List[Dict[str, Any]] = []
     current: Optional[Dict[str, Any]] = None
@@ -286,7 +304,9 @@ def project_text(
                 glyph = (bullet.get("glyph") or "").strip()
                 if glyphs is not None and glyph:
                     glyphs.setdefault(alias, {}).setdefault(str(level), glyph)
-            props.update(_paragraph_props(marker.get("style", {}), level))
+            props.update(
+                _paragraph_props(marker.get("style", {}), level, para_defaults)
+            )
             current = {"runs": [], "props": props}
             paragraphs.append(current)
             continue
@@ -363,6 +383,23 @@ def _merge_runs(
 # --- Elements ---------------------------------------------------------------
 
 
+def _solid(solid: Dict[str, Any]) -> Any:
+    """A solid fill: a colour, {"color", "alpha"} when translucent, or "none".
+
+    A fill with alpha 0 draws nothing, so it reads as "none", the same as a
+    fill that is not rendered. (HTML-imported decks set it on every text box.)
+    """
+    alpha = solid.get("alpha", 1)
+    if alpha == 0:
+        return "none"
+    color = _color(solid.get("color"))
+    if not color:
+        return None
+    if alpha < 1:
+        return {"color": color, "alpha": _pt(alpha)}
+    return color
+
+
 def _shape_props(props: Dict[str, Any]) -> Dict[str, Any]:
     out: Dict[str, Any] = {}
     fill = props.get("shapeBackgroundFill") or {}
@@ -370,26 +407,28 @@ def _shape_props(props: Dict[str, Any]) -> Dict[str, Any]:
     if state == "NOT_RENDERED":
         out["fill"] = "none"
     elif state != "INHERIT" and "solidFill" in fill:
-        color = _color(fill["solidFill"].get("color"))
-        if color:
-            out["fill"] = color
+        solid = _solid(fill["solidFill"])
+        if solid:
+            out["fill"] = solid
     outline = props.get("outline") or {}
     state = outline.get("propertyState")
     if state == "NOT_RENDERED":
         out["outline"] = "none"
     elif state != "INHERIT" and outline:
         o: Dict[str, Any] = {}
-        color = _color(
-            (outline.get("outlineFill") or {}).get("solidFill", {}).get("color")
-        )
-        if color:
-            o["color"] = color
+        solid = _solid((outline.get("outlineFill") or {}).get("solidFill", {}))
+        if solid == "none":
+            out["outline"] = "none"
+        elif isinstance(solid, dict):
+            o.update(solid)
+        elif solid:
+            o["color"] = solid
         weight = _dim_pt(outline.get("weight"))
         if weight is not None:
             o["weight"] = weight
         if outline.get("dashStyle") and outline["dashStyle"] != "SOLID":
             o["dash"] = outline["dashStyle"]
-        if o:
+        if o and out.get("outline") != "none":
             out["outline"] = o
     if props.get("contentAlignment"):
         out["content_align"] = props["contentAlignment"]
@@ -420,6 +459,23 @@ def _kind(el: Dict[str, Any]) -> str:
         if api in el:
             return kind
     return "unknown"
+
+
+def _bullet_shorthand(body: List[Any]) -> List[Any]:
+    """``"bullet": level`` when every bulleted paragraph is in one list."""
+    lists = {
+        p["bullet"]["list"]
+        for p in body
+        if isinstance(p, dict) and isinstance(p.get("bullet"), dict)
+    }
+    if len(lists) != 1:
+        return body
+    return [
+        {**p, "bullet": p["bullet"]["level"]}
+        if isinstance(p, dict) and isinstance(p.get("bullet"), dict)
+        else p
+        for p in body
+    ]
 
 
 class Projector:
@@ -454,7 +510,10 @@ class Projector:
 
         if kind == "shape":
             shape = el["shape"]
-            out["shape"] = shape.get("shapeType")
+            shape_type = shape.get("shapeType")
+            # No "shape" means TEXT_BOX, the commonest type.
+            if shape_type != "TEXT_BOX":
+                out["shape"] = shape_type
             ph = shape.get("placeholder")
             if ph:
                 ptype = ph.get("type")
@@ -483,8 +542,23 @@ class Projector:
             out.update(props)
             if "text" in shape:
                 glyphs: Dict[str, Dict[str, str]] = {}
-                out["text"] = project_text(
-                    shape["text"], self.styles, self.lists, glyphs, scale
+                para_defaults = None
+                if not ph:
+                    # Resolved values the API reports on a shape with no
+                    # placeholder; the editor's defaults, verified live.
+                    para_defaults = {
+                        "align": "START" if shape_type == "TEXT_BOX" else "CENTER",
+                        "line_spacing": 100,
+                    }
+                out["text"] = _bullet_shorthand(
+                    project_text(
+                        shape["text"],
+                        self.styles,
+                        self.lists,
+                        glyphs,
+                        scale,
+                        para_defaults,
+                    )
                 )
                 if glyphs:
                     out["lists"] = {k: {"glyphs": v} for k, v in glyphs.items()}
@@ -572,6 +646,8 @@ def _resolve(value: Any, styles: Dict[str, Dict[str, Any]]) -> Any:
                 out.update(styles.get(v, {}))
             elif k == "bullet" and isinstance(v, dict):
                 out["bullet"] = {"level": v.get("level")}
+            elif k == "bullet" and isinstance(v, int):
+                out["bullet"] = {"level": v}
             else:
                 out[k] = _resolve(v, styles)
         return out
