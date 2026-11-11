@@ -31,6 +31,11 @@ def _pt(value: Optional[float]) -> Optional[float]:
     return int(rounded) if rounded == int(rounded) else rounded
 
 
+def _geo_pt(value: float) -> int:
+    """Geometry is whole points: finer than the editor's 0.01 inch (0.72 pt)."""
+    return int(round(value))
+
+
 def _dim_pt(dim: Optional[Dict[str, Any]]) -> Optional[float]:
     if not dim or "magnitude" not in dim:
         return None
@@ -83,7 +88,12 @@ def project_box(
     det = a * d - b * c
     box: Dict[str, Any] = {}
     if sx == 0:
-        return {"x": _pt(tx / EMU_PER_PT), "y": _pt(ty / EMU_PER_PT), "w": 0, "h": 0}
+        return {
+            "x": _geo_pt(tx / EMU_PER_PT),
+            "y": _geo_pt(ty / EMU_PER_PT),
+            "w": 0,
+            "h": 0,
+        }
     sy = det / sx
     # Shear left after removing rotation: zero for scale + rotation + flip.
     skew = (a * c + b * d) / (sx * sx)
@@ -98,10 +108,10 @@ def project_box(
     h = height * sy
     cx = a * width / 2 + c * height / 2 + tx
     cy = b * width / 2 + d * height / 2 + ty
-    box["x"] = _pt((cx - w / 2) / EMU_PER_PT)
-    box["y"] = _pt((cy - h / 2) / EMU_PER_PT)
-    box["w"] = _pt(w / EMU_PER_PT)
-    box["h"] = _pt(h / EMU_PER_PT)
+    box["x"] = _geo_pt((cx - w / 2) / EMU_PER_PT)
+    box["y"] = _geo_pt((cy - h / 2) / EMU_PER_PT)
+    box["w"] = _geo_pt(w / EMU_PER_PT)
+    box["h"] = _geo_pt(h / EMU_PER_PT)
     rot = round(rot, 2) % 360
     if rot and abs(rot - 360) > 0.005:
         box["rot"] = _pt(rot)
@@ -425,7 +435,10 @@ class Projector:
     ) -> Dict[str, Any]:
         matrix = _compose(parent, _matrix(el.get("transform")))
         kind = _kind(el)
-        out: Dict[str, Any] = {"id": el.get("objectId"), "kind": kind}
+        # A shape's kind is implied by its "shape" type; other kinds name it.
+        out: Dict[str, Any] = {"id": el.get("objectId")}
+        if kind != "shape":
+            out["kind"] = kind
         if group_id:
             out["group"] = group_id
 
@@ -449,6 +462,20 @@ class Projector:
                     f"{ptype}:{ph['index']}" if ph.get("index") else ptype
                 )
             props = _shape_props(shape.get("shapeProperties", {}))
+            if not ph:
+                # A shape with no placeholder parent reports the editor's
+                # default for a new shape (verified live): only a change from
+                # it is information.
+                default_align = (
+                    "TOP" if shape.get("shapeType") == "TEXT_BOX" else "MIDDLE"
+                )
+                if props.get("content_align") == default_align:
+                    props.pop("content_align")
+                if shape.get("shapeType") == "TEXT_BOX":
+                    # New text boxes have no fill and no outline.
+                    for key in ("fill", "outline"):
+                        if props.get(key) == "none":
+                            props.pop(key)
             scale = 1.0
             af = props.get("autofit")
             if isinstance(af, dict):
@@ -485,12 +512,14 @@ class Projector:
         table = el["table"]
         a, b, c, d, tx, ty = matrix
         out: Dict[str, Any] = {
-            "box": {"x": _pt(tx / EMU_PER_PT), "y": _pt(ty / EMU_PER_PT)},
+            "box": {"x": _geo_pt(tx / EMU_PER_PT), "y": _geo_pt(ty / EMU_PER_PT)},
             "col_widths": [
-                _dim_pt(col.get("columnWidth")) for col in table.get("tableColumns", [])
+                _geo_pt(_dim_pt(col.get("columnWidth")) or 0)
+                for col in table.get("tableColumns", [])
             ],
             "row_heights": [
-                _dim_pt(row.get("rowHeight")) for row in table.get("tableRows", [])
+                _geo_pt(_dim_pt(row.get("rowHeight")) or 0)
+                for row in table.get("tableRows", [])
             ],
             "columns": list(range(table.get("columns", 0))),
         }

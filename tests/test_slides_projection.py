@@ -173,3 +173,30 @@ def test_table_merge_and_scoped_group_child():
     assert t["group"] == "g1"
     assert t["box"] == {"x": 10, "y": 5}
     assert t["rows"] == [{"r": 0, "cells": [{"text": ["A"], "span": [1, 2]}, None]}]
+
+
+def test_editor_defaults_are_omitted():
+    defaults = {
+        "contentAlignment": "TOP",
+        "shapeBackgroundFill": {"propertyState": "NOT_RENDERED"},
+        "outline": {"propertyState": "NOT_RENDERED"},
+    }
+    el = project_page(shape_page([para(), run("x\n")], shapeProperties=defaults))[
+        "elements"
+    ][0]
+    assert "kind" not in el and el["shape"] == "TEXT_BOX"
+    assert not {"content_align", "fill", "outline"} & set(el)
+
+    page = shape_page(
+        [para(), run("x\n")], shapeProperties={**defaults, "contentAlignment": "MIDDLE"}
+    )
+    page["pageElements"][0]["shape"]["shapeType"] = "RECTANGLE"
+    el = project_page(page)["elements"][0]
+    # MIDDLE is a rectangle's default; "none" on a rectangle is a real choice.
+    assert "content_align" not in el
+    assert el["fill"] == "none" and el["outline"] == "none"
+
+
+def test_box_is_whole_points():
+    m = (1.0, 0.0, 0.0, 1.0, 10.4 * EMU, 20.6 * EMU)
+    assert project_box(m, size(100.3, 40)) == {"x": 10, "y": 21, "w": 100, "h": 40}

@@ -50,10 +50,9 @@ page g1a2b3c4d5_1_0  SLIDE  2 elements  revision AKXv...
     {
       "id": "g1a2b3c4d5_1_1",
       "v": "7f3a9c01",
-      "kind": "shape",
       "shape": "TEXT_BOX",
       "placeholder": "TITLE",
-      "box": {"x": 54, "y": 31.5, "w": 612, "h": 78.75},
+      "box": {"x": 54, "y": 32, "w": 612, "h": 79},
       "text": [
         {"text": "Checkout conversion is up 12% QoQ", "s": "s1"}
       ]
@@ -118,10 +117,15 @@ carried through untouched by the server because no emitted request touches it.
 
 ### Units and geometry
 
-All lengths are points, rounded to 0.01 pt. Points are one-fifth the digits of
-EMU and are what the Slides editor shows; the server converts at 12,700 EMU per
-point. A value left unchanged is compared in rounded points, so a read-write
-round trip never rewrites geometry.
+All lengths are points. Points are one-fifth the digits of EMU and are what the
+Slides editor shows; the server converts at 12,700 EMU per point. Geometry
+(`box`, `col_widths`, `row_heights`) is rounded to whole points, finer than the
+editor's 0.01 inch (0.72 pt) display and 4.9% fewer tokens than 0.01 pt.
+Text lengths (font sizes, spacing, indents) keep 0.01 pt, because 10.5 pt type
+is common. A value left unchanged is compared in rounded units, and on write
+any coordinate whose rounded value is unchanged keeps its exact current value.
+So a read-write round trip never rewrites geometry, and moving a box 10 pt to
+the right does not also nudge its width by the rounding.
 
 `box` is `{"x", "y", "w", "h"}`: the element's unrotated bounding box on the
 page, as the editor's size-and-position panel shows it, plus `"rot"` (degrees,
@@ -305,6 +309,15 @@ be read and the writes that can be made exactly:
 - `fill` (`"#RRGGBB"`, a theme colour, or `"none"`), `outline`
   (`{"color", "weight", "dash"}` or `"none"`), `content_align` and `link` on a
   shape are emitted only when set locally; absent means inherited.
+- A shape with no placeholder has nothing to inherit from, and the API reports
+  its resolved `content_align`, fill and outline. Verified live, a new shape
+  from the editor or the API gets `content_align` `TOP` for a `TEXT_BOX` and
+  `MIDDLE` for every other type, and a new `TEXT_BOX` has no fill and no
+  outline. Those values are omitted on read, so absent on such a shape means
+  that default. (Measured: 2.0% and 1.7% of tokens.) `"none"` stays on other
+  shape types, which get a theme fill and outline.
+- A shape's `kind` is omitted: its `shape` type says it is a shape. Every other
+  element names its `kind`.
 - An image carries `src`, its `sourceUrl`. Changing it emits `replaceImage`
   with `CENTER_INSIDE`, or with `CENTER_CROP` when the payload sets
   `"fit": "crop"`.
@@ -363,7 +376,8 @@ previous payload, which would overwrite the other change.
 
 **Canonical form**, used for both `v` and equality: styles resolved through the
 table, adjacent runs with identical resolved styles merged, empty runs dropped,
-string and object forms of the same run unified, lengths rounded to 0.01 pt,
+string and object forms of the same run unified, geometry in whole points and
+other lengths rounded to 0.01 pt,
 colours in hex. A table alias like `s1` or `L1` is a name, not content, so
 renaming one never changes `v`.
 
@@ -827,27 +841,29 @@ numbers was not kept, so these replace them.
 | Per slide | Median | p90 |
 | --- | --- | --- |
 | `get_page(raw=True)` today | 3,920 | 19,139 |
-| `get_page` today, digest | 288 | 879 |
-| `get_page(include_geometry, include_styles)` today | 881 | 3,136 |
-| `get_presentation:markup`, compact JSON | 633 | 2,535 |
-| `get_presentation:markup`, `json.dumps` default | 808 | 3,186 |
-| `get_presentation:markup`, indented | 1,020 | 3,974 |
+| `get_page` today, digest | 286 | 877 |
+| `get_page(include_geometry, include_styles)` today | 879 | 3,125 |
+| `get_presentation:markup`, compact JSON | 565 | 2,204 |
+| `get_presentation:markup`, `json.dumps` default | 726 | 2,856 |
+| `get_presentation:markup`, indented | 935 | 3,520 |
 
 | One text-bearing element | Median | p90 |
 | --- | --- | --- |
 | Raw element JSON | 597 | 1,818 |
-| `get_presentation:markup(targets=[id])`, compact | 147 | 253 |
+| `get_presentation:markup(targets=[id])`, compact | 130 | 233 |
 
-- The whole-page projection is a median 16% of the raw resource (p90 20%,
-  worst 26%), and smaller than today's geometry-and-styles text, while being
-  editable and lossless for the writable subset.
+- The whole-page projection is a median 14% of the raw resource (p90 18%,
+  worst 25%), and about two thirds of today's geometry-and-styles text, while
+  being editable and lossless for the writable subset.
+- These numbers include the trims under *Units and geometry* and *Notes, alt
+  text, shape properties, images*: geometry in whole points, editor defaults
+  omitted on shapes with no placeholder, and no `kind` on shapes. Before them
+  the median slide was 633 tokens.
 - Serialization matters: compact separators (`(",", ":")`) save 22% over the
   `json.dumps` default the server uses today, and indenting as the examples in
   this document do costs 60% more. The tool emits compact JSON.
-- Where the tokens go: text 23%, `box` 21%, `id` 12%, `v` 8%, `kind` and
-  `shape` 8% together, `content_align` 3%, `fill` and `outline` 3% each. The
-  prototype emits `content_align` whenever the API reports it; emitting it only
-  when set locally is the next saving to check.
+- Where the tokens go now: text 26%, `box` 19%, `id` 14%, the style table
+  11%, `v` 9%, notes 5%, `shape` 5%, table rows 3%.
 - The prototype does not yet resolve inherited autofit or project inherited
   run sizes in shrink shapes, which adds a `size` to runs in actively shrunk
   shapes only.
