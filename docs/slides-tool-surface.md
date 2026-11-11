@@ -248,9 +248,12 @@ slide's placeholders can only come from its layout, and an opaque ID such as
   only use a layout of the master current at its position (see `manage_presentation:add_slide`).
 - Layout and master content is not shown. `get_presentation:markup` accepts a layout
   ID for that.
-- Corporate templates can carry 20 to 40 layouts. The cost of the section is
-  part of the projection measurement. If it is too large, the fallback is
-  unused layouts by ID and name only, without placeholder types.
+- Measured on 15 real decks (`docs/slides-probe/measure_projection.py`): about
+  18 to 45 tokens a layout, so 196 tokens for 11 layouts and 592 for 22, but
+  1,521 for 45, 3,396 for 104, and 18,660 for one deck with 518 layouts across
+  12 masters (slides pasted in from other decks bring their masters and layouts
+  along). Listing unused layouts by name only saves 4 to 45%, not enough.
+  **Open:** how to cap the section on decks like these.
 
 ## `manage_presentation:add_slide`
 

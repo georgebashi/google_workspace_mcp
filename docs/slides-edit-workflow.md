@@ -818,9 +818,39 @@ built to be small:
 On writes, carry means an agent sends back less than it read: a changed run
 needs only its text.
 
-The projection's size has not been measured yet. The ticket requires measuring
-it on the same 24-slide fixture used for the earlier numbers, for a whole page
-and for one element, against today's `get_page(raw=True)`.
+**Measured** with the prototype in `gslides/slides_projection.py` and
+`docs/slides-probe/measure_projection.py`, on 438 slides: up to 40 evenly spaced
+slides from each of 15 recently modified real decks (2 to 1,632 slides each),
+counted with `o200k_base`. The synthetic 24-slide fixture behind the earlier
+numbers was not kept, so these replace them.
+
+| Per slide | Median | p90 |
+| --- | --- | --- |
+| `get_page(raw=True)` today | 3,920 | 19,139 |
+| `get_page` today, digest | 288 | 879 |
+| `get_page(include_geometry, include_styles)` today | 881 | 3,136 |
+| `get_presentation:markup`, compact JSON | 633 | 2,535 |
+| `get_presentation:markup`, `json.dumps` default | 808 | 3,186 |
+| `get_presentation:markup`, indented | 1,020 | 3,974 |
+
+| One text-bearing element | Median | p90 |
+| --- | --- | --- |
+| Raw element JSON | 597 | 1,818 |
+| `get_presentation:markup(targets=[id])`, compact | 147 | 253 |
+
+- The whole-page projection is a median 16% of the raw resource (p90 20%,
+  worst 26%), and smaller than today's geometry-and-styles text, while being
+  editable and lossless for the writable subset.
+- Serialization matters: compact separators (`(",", ":")`) save 22% over the
+  `json.dumps` default the server uses today, and indenting as the examples in
+  this document do costs 60% more. The tool emits compact JSON.
+- Where the tokens go: text 23%, `box` 21%, `id` 12%, `v` 8%, `kind` and
+  `shape` 8% together, `content_align` 3%, `fill` and `outline` 3% each. The
+  prototype emits `content_align` whenever the API reports it; emitting it only
+  when set locally is the next saving to check.
+- The prototype does not yet resolve inherited autofit or project inherited
+  run sizes in shrink shapes, which adds a `size` to runs in actively shrunk
+  shapes only.
 
 ## Verified API behaviour
 
