@@ -209,7 +209,7 @@ Deck digest. No slide content beyond the title.
 Presentation: Mobile Checkout Refresh - Q4 Readout
 ID: 1xYz_MobileCheckoutQ4Readout
 URL: https://docs.google.com/presentation/d/1xYz_MobileCheckoutQ4Readout/edit
-Slides: 4   Page size: 9144000 x 5143500 EMU   Revision: abc123
+Slides: 4   Page size: 720 x 405 pt   Revision: abc123
 
 1. g1a2b3c4d5_0_0  Mobile Checkout Refresh
    layout p2  2 shapes  notes: 142 chars
