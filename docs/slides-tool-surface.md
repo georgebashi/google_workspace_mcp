@@ -57,6 +57,7 @@ their flags, plus a tool for each new operation. In this document
 | --- | --- | --- | --- |
 | `create_presentation` | — | structure | New deck. Unchanged, like `create_doc`, `create_spreadsheet` and `create_form` |
 | `get_presentation` | `deck` | deck | Slide IDs, titles, element counts, notes state, layouts |
+| | `layouts` | deck | Every layout, for decks with more than 25; the `deck` action lists them all below that |
 | | `page` | page content | Every element with ID, all text, cells, notes, image URLs |
 | | `markup` | element/page IR | Editable projection, whole page or scoped to elements; `raw` for the `Page` resource |
 | | `find` | search | Follow-up, not v1. Slide and element IDs with snippets for a literal match |
@@ -235,7 +236,7 @@ The revision ID is included so a later `manage_presentation:edit` can be guarded
 second read.
 
 **Layouts.** Each slide line names its layout, and a `Layouts` section lists
-every layout once: ID, `layoutProperties.displayName`, the placeholder types it
+layouts once each: ID, `layoutProperties.displayName`, the placeholder types it
 provides, and the slides that use it. This is what `manage_presentation:add_slide` needs, because a
 slide's placeholders can only come from its layout, and an opaque ID such as
 `p3` does not say which layout is "Title and body".
@@ -253,7 +254,29 @@ slide's placeholders can only come from its layout, and an opaque ID such as
   1,521 for 45, 3,396 for 104, and 18,660 for one deck with 518 layouts across
   12 masters (slides pasted in from other decks bring their masters and layouts
   along). Listing unused layouts by name only saves 4 to 45%, not enough.
-  **Open:** how to cap the section on decks like these.
+- **Cap.** With 25 layouts or fewer (about 650 tokens at most), the section
+  lists every layout, so picking one for `add_slide` needs no further call.
+  With more, it lists only the layouts a slide uses, which covers "another one
+  like this", followed by
+  `+ 493 more layouts in 12 masters: get_presentation(action="layouts")`.
+  Rejected: always listing only used layouts (a small template deck would need
+  an extra call before every `add_slide`) and no layouts in `deck` at all
+  (back to an extra call everywhere).
+
+## `get_presentation:layouts`
+
+Every layout in the deck, in the same line format as the `deck` section and
+grouped by master, with no cap. Needed only for decks with more than 25
+layouts, where `deck` lists just the used ones.
+
+| Name | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `presentation_id` | string | yes | |
+| `after` | string | no | Page ID. Limits the list to the master current at that position, which is the only master `add_slide` can use there. |
+
+`after` is the same parameter, with the same meaning, as on `add_slide`, so on a
+518-layout deck the agent fetches only the dozens of layouts it can actually
+choose from.
 
 ## `manage_presentation:add_slide`
 
@@ -279,7 +302,8 @@ write.
   the master of the preceding slide, the first slide's master when inserting at
   the start, or the first master when the deck is empty. A layout from another
   master is a 400 at write time, so it is refused before writing, with the
-  layouts the current master does have.
+  layouts the current master does have (all of them, as
+  `get_presentation:layouts` with the same `after` would list them).
 - A `text` key the layout does not provide is refused, listing the layout's
   placeholder keys. New text follows carry rule 5 of
   `docs/slides-edit-workflow.md`: it takes placeholder and theme defaults.
@@ -560,9 +584,12 @@ Formerly open questions, all settled.
 2. **`get_presentation:deck` lists layouts, not their content.** Slide IDs alone
    were the earlier answer, but `manage_presentation:add_slide` must pick a layout, placeholders
    come only from a layout, and a layout ID does not say what the layout is.
-   Rejected: a separate `layouts` action (an extra call before each
+   Rejected: a `layouts` action as the only source (an extra call before each
    `manage_presentation:add_slide`) and full layout and master content
-   (expensive, and layout editing is a non-goal). See *Layouts* under
+   (expensive, and layout editing is a non-goal). Measurement then showed the
+   list reaching 18,660 tokens on a deck with 518 layouts, so it is capped at 25
+   layouts, above which `deck` lists the used ones and a `layouts` action,
+   scopable to one master with `after`, lists the rest. See *Layouts* under
    `get_presentation:deck`.
 3. **`get_presentation:page` stays flagless.** The condition was that element-scoped
    `get_presentation:markup` carries the context to interpret a nested element. It
