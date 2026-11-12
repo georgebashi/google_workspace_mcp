@@ -856,25 +856,31 @@ numbers was not kept, so these replace them.
 
 | Per slide | Median | p90 |
 | --- | --- | --- |
-| `get_page(raw=True)` today | 3,920 | 19,139 |
-| `get_page` today, digest | 286 | 877 |
-| `get_page(include_geometry, include_styles)` today | 879 | 3,125 |
-| `get_presentation:markup`, compact JSON | 565 | 2,204 |
-| `get_presentation:markup`, `json.dumps` default | 726 | 2,856 |
-| `get_presentation:markup`, indented | 935 | 3,520 |
+| `get_page(raw=True)` today | 3,923 | 19,139 |
+| `get_page` today, digest | 286 | 879 |
+| `get_page(include_geometry, include_styles)` today | 882 | 3,139 |
+| `get_presentation:page`, digest (`gslides/slides_digest.py`) | 233 | 777 |
+| `get_presentation:markup`, compact JSON | 507 | 2,019 |
+| `get_presentation:markup`, `json.dumps` default | 641 | 2,579 |
+| `get_presentation:markup`, indented | 820 | 3,292 |
 
 | One text-bearing element | Median | p90 |
 | --- | --- | --- |
 | Raw element JSON | 597 | 1,818 |
-| `get_presentation:markup(targets=[id])`, compact | 130 | 233 |
+| `get_presentation:markup(targets=[id])`, compact | 120 | 210 |
 
-- The whole-page projection is a median 14% of the raw resource (p90 18%,
-  worst 25%), and about two thirds of today's geometry-and-styles text, while
-  being editable and lossless for the writable subset.
-- These numbers include the trims under *Units and geometry* and *Notes, alt
-  text, shape properties, images*: geometry in whole points, editor defaults
-  omitted on shapes with no placeholder, and no `kind` on shapes. Before them
-  the median slide was 633 tokens.
+- The whole-page projection is a median 13% of the raw resource (p90 17%,
+  worst 24%), and 57% of today's geometry-and-styles text, while being
+  editable and lossless for the writable subset.
+- The new `page` digest is smaller than today's `get_page` (233 against 286)
+  while listing more: table cells, and every element kind. Most of the saving
+  is leaving out image `contentUrl`s.
+- These numbers include every trim recorded in this document: geometry in
+  whole points, editor defaults omitted on shapes with no placeholder
+  (alignment, fill, outline, paragraph alignment and line spacing), implied
+  link styling and bold weight, the bullet shorthand, and no `kind` or
+  `TEXT_BOX` on shapes. Before them the median slide was 633 tokens and one
+  element 147.
 - Serialization matters: compact separators (`(",", ":")`) save 22% over the
   `json.dumps` default the server uses today, and indenting as the examples in
   this document do costs 60% more. The tool emits compact JSON.

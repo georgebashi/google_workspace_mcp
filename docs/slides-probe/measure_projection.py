@@ -24,6 +24,7 @@ import tiktoken
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from gslides.slides_digest import format_deck, format_page  # noqa: E402
 from gslides.slides_projection import project_page  # noqa: E402
 from gslides.slides_tools import _describe_elements  # noqa: E402
 
@@ -173,6 +174,7 @@ def main():
             "raw",
             "get_page",
             "get_page_geometry_styles",
+            "page_digest",
             "markup_default",
             "markup_compact",
             "markup_indented",
@@ -182,6 +184,7 @@ def main():
     per_element = []
     per_element_raw = []
     layouts = []
+    deck_digest = []
     decks = 0
     for deck in load_decks(args):
         decks += 1
@@ -193,6 +196,9 @@ def main():
             per_slide["get_page"].append(tokens(get_page_text(slide)))
             per_slide["get_page_geometry_styles"].append(
                 tokens(get_page_text(slide, True))
+            )
+            per_slide["page_digest"].append(
+                tokens(format_page(slide, deck.get("revisionId"), deck))
             )
             per_slide["markup_default"].append(tokens(proj))
             per_slide["markup_compact"].append(tokens(compact(proj)))
@@ -206,6 +212,9 @@ def main():
                         )
                     )
                     per_element_raw.append(tokens(el))
+        deck_digest.append(
+            {"slides": len(deck.get("slides", [])), "tokens": tokens(format_deck(deck))}
+        )
         layouts.append(
             {
                 "layouts": len(deck.get("layouts", [])),
@@ -222,6 +231,7 @@ def main():
         "markup_compact_over_raw": summarise([round(r, 3) for r in ratio]),
         "one_element_markup_compact": summarise(per_element),
         "one_element_raw": summarise(per_element_raw),
+        "deck_digest": sorted(deck_digest, key=lambda d: d["slides"]),
         "layouts_section": sorted(layouts, key=lambda d: d["layouts"]),
     }
     json.dump(result, open(OUT, "w"), indent=2)

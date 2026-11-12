@@ -151,7 +151,7 @@ page g1a2b3c4d5_1_0  SLIDE  2 elements  revision abc123
   [1,0] iOS app    [1,1] 18.4%       [1,2] +2.1 pts
 
 - chart g1a2b3c4d5_3_1  spreadsheet=1AbCdEfGh  chart=148230971
-- image g1a2b3c4d5_3_2  src=https://example.com/chart.png  url=https://lh7-us.googleusercontent.com/...
+- image g1a2b3c4d5_3_2  src=https://example.com/chart.png
 
 notes shape g1a2b3c4d5_1_notes_shape:
   Frame the ask: one decision, two options. Keep to 15 minutes.
@@ -174,10 +174,11 @@ Rules:
   (`rowIndex`, `columnIndex`), not by array position, and carry `rowSpan` /
   `columnSpan` when merged. One cell per line, so multi-line cell text cannot be
   confused with the next cell.
-- Images carry `src=` (`sourceUrl`) when present and `url=` (`contentUrl`)
-  always. `contentUrl` has a 30-minute lifetime and is tagged to the requesting
-  account, so a sandboxed client may not be able to fetch it; that caveat belongs
-  in the tool description.
+- Images carry `src=` (`sourceUrl`) when present. `contentUrl` is left out: it
+  costs about 160 tokens per image (30% of the digest on a real 9-slide deck),
+  expires after 30 minutes and is tagged to the requesting account, so a
+  sandboxed client often cannot fetch it. The tool description points to
+  `render_page_to_image` to see an image.
 - Alt text appears only when non-empty. Empty alt is not reported.
 - `notes` appears only when notes exist, with the notes shape ID needed to write
   them.
@@ -229,8 +230,10 @@ Layouts:
 ```
 
 Titles come from the title placeholder when the slide has one, otherwise from the
-first text-bearing element in z-order. The fallback matters because decks built
-through this MCP are bare text boxes with no placeholder.
+text set in the largest font, ties going to z-order. The fallback matters because
+decks built through this MCP, and HTML imports, are bare text boxes with no
+placeholder, and they often put a small label above the headline, so the first
+text in z-order is the label.
 
 The revision ID is included so a later `manage_presentation:edit` can be guarded without a
 second read.

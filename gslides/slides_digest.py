@@ -81,8 +81,22 @@ def _notes(
     return notes_id, []
 
 
+def _largest_font(text: Optional[Dict[str, Any]]) -> float:
+    sizes = [
+        ((te["textRun"].get("style") or {}).get("fontSize") or {}).get("magnitude", 0)
+        for te in (text or {}).get("textElements", [])
+        if "textRun" in te and te["textRun"].get("content", "").strip()
+    ]
+    return max(sizes, default=0)
+
+
 def slide_title(slide: Dict[str, Any]) -> Optional[str]:
-    """Title placeholder text, else the first text-bearing element in z-order."""
+    """Title placeholder text, else the text set in the largest font.
+
+    Slides built without placeholders (HTML imports, decks made through this
+    MCP) often put a small label above the headline, so the first text in
+    z-order is not the title; the largest type is. Ties go to z-order.
+    """
     elements = list(_walk(slide.get("pageElements", [])))
     for el in elements:
         ph = (el.get("shape") or {}).get("placeholder") or {}
@@ -90,11 +104,17 @@ def slide_title(slide: Dict[str, Any]) -> Optional[str]:
             paras = _paragraphs(el["shape"].get("text"))
             if paras:
                 return paras[0][1]
+    best: Optional[str] = None
+    best_size = -1.0
     for el in elements:
-        paras = _paragraphs((el.get("shape") or {}).get("text"))
-        if paras:
-            return paras[0][1]
-    return None
+        text = (el.get("shape") or {}).get("text")
+        paras = _paragraphs(text)
+        if not paras:
+            continue
+        size = _largest_font(text)
+        if size > best_size:
+            best, best_size = paras[0][1], size
+    return best
 
 
 def _plural(n: int, word: str) -> str:
@@ -278,11 +298,12 @@ def _element_lines(el: Dict[str, Any], indent: str) -> List[str]:
                 )
     elif kind == "image":
         image = el["image"]
+        # contentUrl is left out: about 160 tokens each, it expires after 30
+        # minutes and is tied to the caller's account. render_page_to_image
+        # shows the image.
         head = f"{indent}- image {oid}"
         if image.get("sourceUrl"):
             head += f"  src={image['sourceUrl']}"
-        if image.get("contentUrl"):
-            head += f"  url={image['contentUrl']}"
         lines.append(head)
     elif kind == "chart":
         chart = el["sheetsChart"]
