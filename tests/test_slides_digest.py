@@ -18,8 +18,8 @@ def box(oid, text, size=None, placeholder=None):
 
 
 def test_title_prefers_placeholder_then_largest_font():
-    label, headline = box("a", "ANNOUNCEMENT", 8), box("b", "Commerce Review Bot", 17)
-    assert slide_title({"pageElements": [label, headline]}) == "Commerce Review Bot"
+    label, headline = box("a", "ANNOUNCEMENT", 8), box("b", "Quarterly Review", 17)
+    assert slide_title({"pageElements": [label, headline]}) == "Quarterly Review"
     title = box("c", "Real title", 12, placeholder="TITLE")
     assert slide_title({"pageElements": [label, headline, title]}) == "Real title"
 
