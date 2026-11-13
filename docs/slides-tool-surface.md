@@ -203,6 +203,7 @@ Deck digest. No slide content beyond the title.
 | Name | Type | Required | Notes |
 | --- | --- | --- | --- |
 | `presentation_id` | string | yes | |
+| `offset` | integer | no | Slide index to start from, for the next page of a long deck. Default 0. |
 
 **Output body**
 
@@ -228,6 +229,21 @@ Layouts:
   p5   Two columns      TITLE, BODY:1, BODY:2      -
   p11  Blank            -                          slides 3-4
 ```
+
+**Paging.** `deck` lists 100 slides at a time, the way `get_drive_file_content`
+pages long text by `offset`. A longer deck ends with a note giving the offset
+to read on from:
+
+```
+[Showing slides 1 to 100 of 1,632; 1,532 more follow. Call again with offset=100 to read on.]
+```
+
+The header's revision tells a reader paging through that the deck changed, so
+it can start again from `offset=0`. Each slide costs about 50 tokens, so an
+unpaged digest reached 82,265 tokens on a 1,632-slide deck; measured on 15
+real decks, the largest page is 8,091 tokens and decks under 100 slides are
+one page as before. On a page of a deck with more than 25 layouts, the
+layouts section lists those the page's slides use, so it stays bounded too.
 
 Titles come from the title placeholder when the slide has one, otherwise from the
 text set in the largest font, ties going to z-order. The fallback matters because

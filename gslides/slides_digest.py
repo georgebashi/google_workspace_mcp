@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 EMU_PER_PT = 12700
 LAYOUT_CAP = 25
+DECK_PAGE_SLIDES = 100
 FIND_CAP = 50
 _TITLE_TYPES = ("TITLE", "CENTERED_TITLE")
 
@@ -194,8 +195,15 @@ def format_layouts(
     pres: Dict[str, Any],
     after: Optional[str] = None,
     only_used: bool = False,
+    used_by: Optional[Iterable[str]] = None,
 ) -> List[str]:
+    """Layout lines grouped by master.
+
+    ``only_used`` keeps layouts some slide uses; ``used_by`` narrows that to
+    the given layout IDs (those used by one page of the deck).
+    """
     used = _layout_usage(pres)
+    wanted = set(used_by) if used_by is not None else set(used)
     masters = {m.get("objectId"): m for m in pres.get("masters", [])}
     only_master = _master_of_position(pres, after) if after else None
     by_master: Dict[str, List[Dict[str, Any]]] = {}
@@ -203,7 +211,7 @@ def format_layouts(
         mid = (layout.get("layoutProperties") or {}).get("masterObjectId")
         if only_master and mid != only_master:
             continue
-        if only_used and layout.get("objectId") not in used:
+        if only_used and layout.get("objectId") not in wanted:
             continue
         by_master.setdefault(mid, []).append(layout)
     lines: List[str] = []
@@ -220,20 +228,34 @@ def format_layouts(
 # --- deck -------------------------------------------------------------------
 
 
-def format_deck(pres: Dict[str, Any]) -> str:
+def format_deck(
+    pres: Dict[str, Any], offset: int = 0, limit: int = DECK_PAGE_SLIDES
+) -> str:
+    """Deck digest, ``limit`` slides from slide index ``offset``.
+
+    Pages the way get_drive_file_content does: a note at the end gives the
+    offset to call again with. The header's revision lets a reader paging
+    through tell that the deck changed and start again from offset 0.
+    """
     pid = pres.get("presentationId")
     size = pres.get("pageSize") or {}
     w = size.get("width", {}).get("magnitude", 0) / EMU_PER_PT
     h = size.get("height", {}).get("magnitude", 0) / EMU_PER_PT
     slides = pres.get("slides", [])
+    total = len(slides)
+    if offset < 0:
+        raise ValueError(f"offset must be >= 0, got {offset}.")
+    if total and offset >= total:
+        return f"[offset={offset:,} is past the last slide ({total:,} slides).]"
+    shown = slides[offset : offset + limit]
     lines = [
         f"Presentation: {pres.get('title', '')}",
         f"ID: {pid}",
         f"URL: https://docs.google.com/presentation/d/{pid}/edit",
-        f"Slides: {len(slides)}   Page size: {w:g} x {h:g} pt   Revision: {pres.get('revisionId', '-')}",
+        f"Slides: {total}   Page size: {w:g} x {h:g} pt   Revision: {pres.get('revisionId', '-')}",
         "",
     ]
-    for n, slide in enumerate(slides, 1):
+    for n, slide in enumerate(shown, offset + 1):
         _, notes = _notes(slide)
         chars = sum(len(t) for _, t in notes)
         layout = (slide.get("slideProperties") or {}).get("layoutObjectId")
@@ -244,21 +266,34 @@ def format_deck(pres: Dict[str, Any]) -> str:
             f"   layout {layout}  {_counts(slide)}  notes: {f'{chars} chars' if chars else '-'}"
         )
     layouts = pres.get("layouts", [])
+    paged = len(shown) < total
     lines.append("")
     if len(layouts) <= LAYOUT_CAP:
         lines.append("Layouts:")
         lines.extend(format_layouts(pres))
     else:
-        lines.append("Layouts used by slides:")
-        lines.extend(format_layouts(pres, only_used=True))
-        shown = sum(
-            1 for line in format_layouts(pres, only_used=True) if line.startswith("  ")
+        # On a page of a long deck, the layouts this page's slides use: enough
+        # for "another one like this", and bounded by the page size.
+        page_layouts = {
+            (s.get("slideProperties") or {}).get("layoutObjectId") for s in shown
+        }
+        listed = format_layouts(pres, only_used=True, used_by=page_layouts)
+        lines.append(
+            "Layouts used by these slides:" if paged else "Layouts used by slides:"
         )
+        lines.extend(listed)
+        count = sum(1 for line in listed if line.startswith("  "))
         masters = len(pres.get("masters", []))
         lines.append(
-            f"+ {len(layouts) - shown} more layouts in {_plural(masters, 'master')}: "
+            f"+ {len(layouts) - count} more layouts in {_plural(masters, 'master')}: "
             'get_presentation(action="layouts")'
         )
+    end = offset + len(shown)
+    if paged:
+        note = f"[Showing slides {offset + 1:,} to {end:,} of {total:,}"
+        if end < total:
+            note += f"; {total - end:,} more follow. Call again with offset={end} to read on"
+        lines.extend(["", note + ".]"])
     return "\n".join(lines)
 
 

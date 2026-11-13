@@ -35,3 +35,32 @@ def test_page_lists_image_source_but_not_content_url():
     out = format_page({"objectId": "p1", "pageElements": [image]}, revision="r1")
     assert "- image i1  src=https://example.com/a.png" in out
     assert "lh7" not in out
+
+
+def test_deck_pages_by_slide_with_offset_note():
+    from gslides.slides_digest import format_deck
+
+    slides = [
+        {
+            "objectId": f"s{i}",
+            "slideProperties": {"layoutObjectId": "L"},
+            "pageElements": [box(f"t{i}", f"Slide {i}", 20)],
+        }
+        for i in range(250)
+    ]
+    pres = {
+        "presentationId": "p",
+        "title": "Big",
+        "slides": slides,
+        "layouts": [{"objectId": "L"}],
+    }
+    first = format_deck(pres)
+    assert "100. s99  Slide 99" in first and "101." not in first
+    assert first.endswith(
+        "[Showing slides 1 to 100 of 250; 150 more follow. Call again with offset=100 to read on.]"
+    )
+    last = format_deck(pres, offset=200)
+    assert "201. s200  Slide 200" in last
+    assert last.endswith("[Showing slides 201 to 250 of 250.]")
+    assert "past the last slide" in format_deck(pres, offset=250)
+    assert "Showing slides" not in format_deck({**pres, "slides": slides[:5]})
